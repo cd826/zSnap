@@ -7,10 +7,17 @@ import SwiftUI
 final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private let state: EditorState
     private let onClose: () -> Void
+    /// 贴图：携带最终渲染图与逻辑尺寸交由协调器创建悬浮窗（需求 6.1）。
+    private let onPin: (CGImage, CGSize) -> Void
 
-    init(document: ScreenshotDocument, onClose: @escaping () -> Void) {
+    init(
+        document: ScreenshotDocument,
+        onClose: @escaping () -> Void,
+        onPin: @escaping (CGImage, CGSize) -> Void
+    ) {
         self.state = EditorState(document: document)
         self.onClose = onClose
+        self.onPin = onPin
 
         let window = NSWindow(
             contentRect: Self.fittedContentRect(aspect: document.pixelSize),
@@ -29,8 +36,20 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
         let rootView = EditorRootView(state: state, onClose: { [weak window] in
             window?.performClose(nil)
+        }, onPin: { [weak self] in
+            self?.pinAndClose()
         })
         window.contentView = NSHostingView(rootView: rootView)
+    }
+
+    /// 渲染最终图 → 创建贴图 → 关闭编辑器（需求 6.1）。
+    private func pinAndClose() {
+        guard let image = state.renderFinalImage() else {
+            state.flash("贴图失败：无法生成图片")
+            return
+        }
+        onPin(image, state.document.logicalSize)
+        window?.performClose(nil)
     }
 
     @available(*, unavailable)
@@ -72,13 +91,14 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 struct EditorRootView: View {
     @ObservedObject var state: EditorState
     let onClose: () -> Void
+    let onPin: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             EditorCanvasRepresentable(state: state)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
-            EditorToolbarView(state: state, onClose: onClose)
+            EditorToolbarView(state: state, onClose: onClose, onPin: onPin)
         }
         .overlay(alignment: .top) {
             if let message = state.statusMessage {
@@ -118,6 +138,7 @@ struct EditorCanvasRepresentable: NSViewRepresentable {
 struct EditorToolbarView: View {
     @ObservedObject var state: EditorState
     let onClose: () -> Void
+    let onPin: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
@@ -311,9 +332,10 @@ struct EditorToolbarView: View {
             }
             .help("保存 PNG ⌘S")
 
-            Button("贴图") {}
-                .disabled(true)
-                .help("贴图（Phase 3 提供）")
+            Button(action: onPin) {
+                Label("贴图", systemImage: "pin")
+            }
+            .help("创建悬浮置顶贴图（含全部标注）")
 
             Button("取消", action: onClose)
                 .help("关闭编辑器 Esc")

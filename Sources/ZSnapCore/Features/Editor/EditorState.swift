@@ -153,6 +153,15 @@ final class EditorState: ObservableObject {
 
     // MARK: - 输出
 
+    /// 渲染最终图片（原图 + 全部标注），供贴图等下游使用。
+    func renderFinalImage() -> CGImage? {
+        ImageExportService.renderedImage(
+            from: document,
+            annotations: engine.annotations,
+            mosaicImage: mosaicImage()
+        )
+    }
+
     /// 复制最终渲染图片到剪贴板（含全部标注，需求 5.1）。
     func copyFinalImage() {
         guard let image = ImageExportService.renderedImage(

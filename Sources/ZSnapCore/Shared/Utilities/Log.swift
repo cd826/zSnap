@@ -7,6 +7,7 @@ enum Log {
     static let capture = Logger(subsystem: subsystem, category: "capture")
     static let selection = Logger(subsystem: subsystem, category: "selection")
     static let shortcut = Logger(subsystem: subsystem, category: "shortcut")
+    static let pin = Logger(subsystem: subsystem, category: "pin")
 
     private static let subsystem = "com.cd826.zSnap"
 }

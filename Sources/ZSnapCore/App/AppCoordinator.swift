@@ -9,6 +9,7 @@ final class AppCoordinator: NSObject {
 
     let shortcutManager = ShortcutManager()
     private let captureService = ScreenCaptureService()
+    private let pinManager = PinWindowManager()
 
     private var selectionController: SelectionOverlayController?
     private var editorController: EditorWindowController?
@@ -215,11 +216,19 @@ final class AppCoordinator: NSObject {
     /// 截图完成后进入统一编辑器（需求 4.1 / 7.2：普通截图与长截图共用）。
     private func showEditor(image: CGImage, logicalSize: CGSize) {
         let document = ScreenshotDocument(image: image, logicalSize: logicalSize)
-        let controller = EditorWindowController(document: document, onClose: { [weak self] in
-            guard let self else { return }
-            self.editorController = nil
-            self.transition(to: .idle)
-        })
+        let controller = EditorWindowController(
+            document: document,
+            onClose: { [weak self] in
+                guard let self else { return }
+                self.editorController = nil
+                self.transition(to: .idle)
+            },
+            onPin: { [weak self] pinImage, pinLogicalSize in
+                // 贴图放置在编辑器所在屏幕（此刻编辑器还是 key window）。
+                guard let self else { return }
+                self.pinManager.createPin(image: pinImage, logicalSize: pinLogicalSize, on: NSApp.keyWindow?.screen)
+            }
+        )
         editorController = controller
         transition(to: .editing)
         controller.show()
