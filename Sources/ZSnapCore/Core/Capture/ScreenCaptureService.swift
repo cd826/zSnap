@@ -8,6 +8,13 @@ import ScreenCaptureKit
 /// - 快照在遮罩层显示之前获取（"冻结快照"方案），从根本上保证遮罩/工具栏不会截入图片。
 /// - 优先以 .best 捕获原生像素；若返回尺寸与显示器像素尺寸不符，回退为显式指定像素尺寸重试。
 final class ScreenCaptureService {
+    /// 一次截图会话的数据：各显示器冻结快照 + 当前可共享窗口列表（用于窗口截图匹配）。
+    struct CaptureSession {
+        let snapshots: [DisplaySnapshot]
+        /// SCWindows 顺序无 z 序保证；窗口匹配需结合 CGWindowList 的命中结果（pid + frame）。
+        let windows: [SCWindow]
+    }
+
     struct DisplaySnapshot {
         let geometry: DisplayGeometry
         let image: CGImage
@@ -24,8 +31,8 @@ final class ScreenCaptureService {
         }
     }
 
-    /// 抓取当前所有显示器的冻结快照（区域截图第一步）。
-    func captureAllDisplays() async throws -> [DisplaySnapshot] {
+    /// 抓取一次截图会话：所有显示器的冻结快照 + 可共享窗口列表。
+    func captureSession() async throws -> CaptureSession {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         var snapshots: [DisplaySnapshot] = []
 
@@ -50,7 +57,7 @@ final class ScreenCaptureService {
         }
 
         guard !snapshots.isEmpty else { throw CaptureError.noDisplayCaptured }
-        return snapshots
+        return CaptureSession(snapshots: snapshots, windows: content.windows)
     }
 
     /// 抓取单个显示器的完整快照（全屏截图入口）。
@@ -63,6 +70,21 @@ final class ScreenCaptureService {
             throw CaptureError.noDisplayCaptured
         }
         return try await Self.captureDisplay(display, screen: screen)
+    }
+
+    /// 截取窗口自身内容（desktopIndependentWindow）：
+    /// 即使窗口被部分遮挡也能截取完整内容，且不含窗口阴影。
+    /// - Parameter scale: 窗口所在显示器的缩放系数，决定输出像素密度。
+    func captureWindow(_ window: SCWindow, scale: CGFloat) async throws -> CGImage {
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let configuration = SCStreamConfiguration()
+        configuration.showsCursor = false
+        configuration.captureResolution = .best
+        configuration.width = max(1, Int((window.frame.width * scale).rounded()))
+        configuration.height = max(1, Int((window.frame.height * scale).rounded()))
+        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+        Log.capture.info("窗口截图完成：\(image.width)×\(image.height) px")
+        return image
     }
 
     // MARK: - Private

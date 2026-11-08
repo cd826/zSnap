@@ -1,8 +1,8 @@
 import AppKit
 
 /// 菜单栏菜单（需求 3.1）。
-/// Phase 0 范围：区域截图、全屏截图（按显示器子菜单）、退出。
-/// 窗口截图（Phase 1）与设置（Phase 5）以禁用状态占位并注明阶段，不做假入口。
+/// 区域截图 / 窗口截图共用同一选区会话（悬停高亮 + 智能点击）；全屏截图按显示器子菜单。
+/// 设置入口 Phase 5 提供，以禁用状态占位并注明阶段，不做假入口。
 @MainActor
 enum MenuBuilder {
     static func buildMenu(coordinator: AppCoordinator) -> NSMenu {
@@ -39,9 +39,14 @@ enum MenuBuilder {
         fullscreenItem.submenu = fullscreenMenu
         menu.addItem(fullscreenItem)
 
-        // 窗口截图：Phase 1 提供
-        let windowCapture = NSMenuItem(title: "窗口截图（Phase 1 提供）", action: nil, keyEquivalent: "")
-        windowCapture.isEnabled = false
+        // 窗口截图：与区域截图共用同一选区会话（悬停高亮窗口，智能点击分发）。
+        let windowCapture = NSMenuItem(
+            title: "窗口截图",
+            action: #selector(AppCoordinator.startRegionCaptureFromMenu),
+            keyEquivalent: ""
+        )
+        windowCapture.target = coordinator
+        windowCapture.isEnabled = true
         menu.addItem(windowCapture)
 
         menu.addItem(.separator())

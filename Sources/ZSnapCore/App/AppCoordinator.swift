@@ -1,4 +1,5 @@
 import AppKit
+import ScreenCaptureKit
 
 /// 应用协调器：唯一的状态机持有者，负责截图流程编排（需求 9.1 / 9.2）。
 /// 正在选区或展示结果时，重复触发会被拒绝并留痕。
@@ -54,19 +55,25 @@ final class AppCoordinator: NSObject {
 
     private func runRegionCapture() async {
         do {
-            let snapshots = try await captureService.captureAllDisplays()
-            beginSelection(with: snapshots)
+            let session = try await captureService.captureSession()
+            beginSelection(with: session)
         } catch {
             transition(to: .idle)
             presentError("截图失败：\(error.localizedDescription)")
         }
     }
 
-    private func beginSelection(with snapshots: [ScreenCaptureService.DisplaySnapshot]) {
+    private func beginSelection(with session: ScreenCaptureService.CaptureSession) {
+        // 窗口列表在覆盖层创建之前枚举（此时自身覆盖窗口还未上屏）。
+        let windowList = WindowListService.currentWindows()
         let controller = SelectionOverlayController(
-            snapshots: snapshots,
+            snapshots: session.snapshots,
+            windows: windowList,
             onFinish: { [weak self] globalRect, snapshot in
                 self?.completeSelection(globalRect: globalRect, snapshot: snapshot)
+            },
+            onWindowCapture: { [weak self] windowInfo in
+                self?.completeWindowCapture(windowInfo, session: session)
             },
             onCancel: { [weak self] in
                 guard let self else { return }
@@ -92,6 +99,89 @@ final class AppCoordinator: NSObject {
             "裁剪完成：\(Int(globalRect.width))×\(Int(globalRect.height)) pt → \(cropped.width)×\(cropped.height) px"
         )
         showPreview(image: cropped, logicalSize: globalRect.size)
+    }
+
+    // MARK: - 窗口截图
+
+    /// 点击命中窗口：优先用 SCK 独立窗口截图（完整内容、无阴影、可被遮挡）；
+    /// 匹配不到 SCWindow 时回退为从显示器快照裁剪（可能包含遮挡内容，已知限制）。
+    private func completeWindowCapture(
+        _ window: WindowInfo,
+        session: ScreenCaptureService.CaptureSession
+    ) {
+        selectionController = nil
+        let boundsText = "\(Int(window.cgBounds.minX)),\(Int(window.cgBounds.minY)) \(Int(window.cgBounds.width))×\(Int(window.cgBounds.height))"
+        Log.app.info("窗口截图开始：\(window.displayName, privacy: .public) @ \(boundsText, privacy: .public)")
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let matched = Self.matchSCWindow(for: window, in: session.windows)
+                let image: CGImage
+                let logicalSize: CGSize
+                if let scWindow = matched {
+                    let scale = self.scaleForWindow(cgBounds: window.cgBounds, snapshots: session.snapshots)
+                    image = try await self.captureService.captureWindow(scWindow, scale: scale)
+                    logicalSize = window.appKitFrame.size
+                } else {
+                    Log.app.notice("未匹配到 SCWindow，回退为快照裁剪")
+                    guard let (cropped, size) = self.cropFallback(for: window, snapshots: session.snapshots) else {
+                        self.transition(to: .idle)
+                        self.presentError("窗口截图失败：无法定位窗口内容。")
+                        return
+                    }
+                    image = cropped
+                    logicalSize = size
+                }
+                self.showPreview(image: image, logicalSize: logicalSize)
+            } catch {
+                self.transition(to: .idle)
+                self.presentError("窗口截图失败：\(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// 按 pid + frame（CG 坐标系，两者一致）匹配 SCWindow，容差 1pt。
+    private static func matchSCWindow(for window: WindowInfo, in scWindows: [SCWindow]) -> SCWindow? {
+        scWindows.first { scWindow in
+            guard scWindow.owningApplication?.processID == window.ownerPID else { return false }
+            let frame = scWindow.frame
+            return abs(frame.minX - window.cgBounds.minX) <= 1
+                && abs(frame.minY - window.cgBounds.minY) <= 1
+                && abs(frame.width - window.cgBounds.width) <= 1
+                && abs(frame.height - window.cgBounds.height) <= 1
+        }
+    }
+
+    /// 用窗口中心所在显示器的缩放系数决定窗口截图的输出像素密度。
+    private func scaleForWindow(
+        cgBounds: CGRect,
+        snapshots: [ScreenCaptureService.DisplaySnapshot]
+    ) -> CGFloat {
+        let center = WindowFrameConverter.appKitPoint(
+            fromCGPoint: CGPoint(x: cgBounds.midX, y: cgBounds.midY),
+            primaryDisplayHeight: WindowFrameConverter.primaryDisplayHeight()
+        )
+        return snapshots
+            .first { $0.geometry.logicalFrame.contains(center) }?
+            .geometry.scaleFactor ?? 2
+    }
+
+    /// 回退路径：从包含窗口的显示器快照中裁剪窗口矩形。
+    private func cropFallback(
+        for window: WindowInfo,
+        snapshots: [ScreenCaptureService.DisplaySnapshot]
+    ) -> (CGImage, CGSize)? {
+        guard let snapshot = snapshots.first(where: { $0.geometry.logicalFrame.contains(window.appKitFrame) })
+            ?? snapshots.first(where: { $0.geometry.logicalFrame.intersects(window.appKitFrame) }) else {
+            return nil
+        }
+        let pixelRect = ImageCoordinateConverter.pixelRect(fromGlobalRect: window.appKitFrame, in: snapshot.geometry)
+        guard pixelRect.width > 0, pixelRect.height > 0,
+              let cropped = snapshot.image.cropping(to: pixelRect) else {
+            return nil
+        }
+        return (cropped, window.appKitFrame.size)
     }
 
     // MARK: - 全屏截图（Phase 0 验证入口）
