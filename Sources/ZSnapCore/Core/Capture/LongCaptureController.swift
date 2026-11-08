@@ -23,7 +23,6 @@ final class LongCaptureController {
     private var canvasImage: CGImage?
     private var coveredRows = 0             // 内容方向已覆盖行数（图片像素）
     private var lastFrameGray: ScrollStitcher.GrayImage?
-    private var lastFrame: CGImage?
     private var frameCount = 0
     private var gapDetected = false
     private var hasFinished = false
@@ -111,18 +110,17 @@ final class LongCaptureController {
         frameCount += 1
 
         guard let gray = ScrollStitcher.grayscale(from: frame) else { return }
-        defer { lastFrameGray = gray; lastFrame = frame }
 
         // 首帧：直接作为拼接画布。
         guard let previous = lastFrameGray, canvasImage != nil else {
             canvasImage = frame
             coveredRows = frame.height
+            lastFrameGray = gray
             updateHUD()
             return
         }
 
-        // 锚定式分析：上一帧底带在当前帧中的位置决定新内容起点。
-        // 注意：匹配在灰度降采样空间进行，fromRow 已换算回全分辨率。
+        // 锚定式分析（多横带一致性校验）：fromRow 已换算回全分辨率。
         switch ScrollStitcher.analyzeScroll(previous: previous, current: gray, downscale: 2) {
         case .append(let fromRow):
             let appendCount = frame.height - fromRow
@@ -138,10 +136,13 @@ final class LongCaptureController {
                 rect: CGRect(x: 0, y: fromRow, width: frame.width, height: appendCount)
             )
             gapDetected = false
+            lastFrameGray = gray
         case .noNewContent:
             gapDetected = false
+            lastFrameGray = gray
         case .unreliable:
-            // 底带滚出画面（滚动过快）或画面突变：跳过并提示，回滚可补拍。
+            // 多带位移不一致（平滑区域误配）或底带滚出画面（滚动过快）：
+            // 跳过该帧并冻结锚点（不更新参考帧），用户回滚后可从原处恢复拼接。
             gapDetected = true
         }
         updateHUD()

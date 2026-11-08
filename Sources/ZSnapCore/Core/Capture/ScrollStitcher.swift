@@ -54,23 +54,34 @@ enum ScrollStitcher {
     }
 
     /// 分析当前帧相对上一帧的新内容位置。
-    /// - Parameters:
-    ///   - downscale: 灰度图的降采样系数，用于把匹配结果换算回全分辨率行号。
-    /// - Returns: `append(fromRow:)` 的行号基于**全分辨率**帧（y 向下）。
+    ///
+    /// 多横带一致性校验：在上一帧 45%/60%/75% 高度取三条横带分别在新帧中定位，
+    /// 三者推得的滚动位移必须一致才采纳。平滑纹理区域（纯色/木纹/渐变）的单带
+    /// 匹配存在歧义，但多条横带各自乱配出的位移几乎不可能互相一致——以此把
+    /// "误配"转化为"跳帧"（宁缺勿重），配合控制器冻结锚点支持回滚补拍。
+    ///
+    /// - Parameter downscale: 灰度图降采样系数，用于把结果换算回全分辨率行号。
+    /// - Returns: `append(fromRow:)` 行号基于**全分辨率**帧（y 向下）。
     static func analyzeScroll(previous: GrayImage, current: GrayImage, downscale: Int = 1, bandRows: Int = 24) -> AppendResult {
         guard previous.width == current.width,
-              previous.height >= bandRows,
+              previous.height >= bandRows * 2,
               current.height >= bandRows,
               downscale >= 1 else { return .unreliable }
 
         let grayHeight = current.height
         let fullHeight = grayHeight * downscale
 
-        // 主路径：上一帧底部横带（= 已拼内容最后一行）在当前帧中的位置。
-        if let bottomBand = band(of: previous, range: (previous.height - bandRows)..<previous.height),
-           let matchedRow = locateBand(bottomBand, in: current) {
-            // 新内容 = 匹配行 + bandRows 之后到帧底（灰度空间），换算到全分辨率。
-            let appendStart = min(fullHeight, (matchedRow + bandRows) * downscale)
+        // 主路径：多横带一致性校验。
+        var offsets: [Int] = []
+        for fraction in [0.45, 0.60, 0.75] {
+            let y = Int(Double(previous.height) * fraction)
+            guard y + bandRows <= previous.height,
+                  let band = band(of: previous, range: y..<(y + bandRows)),
+                  let matchedRow = locateBand(band, in: current) else { continue }
+            offsets.append(y - matchedRow)
+        }
+        if offsets.count >= 2, let scrollOffset = consistentValue(offsets, tolerance: 2) {
+            let appendStart = min(fullHeight, (grayHeight - scrollOffset) * downscale)
             if appendStart < fullHeight {
                 return .append(fromRow: appendStart)
             }
@@ -85,6 +96,15 @@ enum ScrollStitcher {
         }
 
         return .unreliable
+    }
+
+    /// 所有值彼此差 ≤ tolerance 时返回中位值，否则 nil。
+    private static func consistentValue(_ values: [Int], tolerance: Int) -> Int? {
+        guard let first = values.first else { return nil }
+        for value in values where abs(value - first) > tolerance {
+            return nil
+        }
+        return values.sorted()[values.count / 2]
     }
 
     // MARK: - 内部
