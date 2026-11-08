@@ -26,7 +26,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             defer: false
         )
         window.title = "zSnap 编辑"
-        window.minSize = NSSize(width: 720, height: 460)
+        window.minSize = NSSize(width: 880, height: 460)
         window.center()
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
@@ -87,7 +87,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             height = maxHeight
             width = height * imageAspect
         }
-        return NSRect(x: 0, y: 0, width: max(720, width), height: max(460, height + 56))
+        return NSRect(x: 0, y: 0, width: max(880, width), height: max(460, height + 56))
     }
 }
 
@@ -155,13 +155,18 @@ struct EditorToolbarView: View {
     let onClose: () -> Void
     let onPin: () -> Void
 
+    @State private var showingColorPopover = false
+
+    private static let fontSizeTitles = ["小", "中", "大"]
+    private static let colorNames = ["红色", "橙色", "黄色", "绿色", "蓝色", "白色", "黑色"]
+
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             toolButtons
             toolbarDivider
-            colorButtons
-            toolbarDivider
-            sizeControls
+            colorMenuButton
+            widthMenu
+            fontSizeMenu
             toolbarDivider
             zoomButtons
             toolbarDivider
@@ -169,8 +174,8 @@ struct EditorToolbarView: View {
             toolbarDivider
             outputButtons
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 11)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .background(.bar)
     }
 
@@ -227,95 +232,150 @@ struct EditorToolbarView: View {
         }
     }
 
-    // MARK: 颜色
+    // MARK: 颜色（按钮 + 弹层选色）
 
-    private var colorButtons: some View {
-        HStack(spacing: 6) {
-            ForEach(Array(RGBAColor.palette.enumerated()), id: \.offset) { _, paletteColor in
-                Button {
-                    state.color = paletteColor
-                    state.applyColorToSelected()
-                } label: {
-                    Circle()
-                        .fill(Color(red: paletteColor.red, green: paletteColor.green, blue: paletteColor.blue))
-                        .frame(width: 19, height: 19)
-                        .overlay(
-                            Circle()
-                                .strokeBorder(
-                                    state.color == paletteColor ? Color.primary.opacity(0.8) : Color.clear,
-                                    lineWidth: 1.5
-                                )
-                        )
-                }
-                .buttonStyle(.plain)
-                .help("标注颜色")
+    private var colorMenuButton: some View {
+        Button {
+            showingColorPopover = true
+        } label: {
+            HStack(spacing: 4) {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(red: state.color.red, green: state.color.green, blue: state.color.blue))
+                    .frame(width: 20, height: 20)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .strokeBorder(Color.primary.opacity(0.3), lineWidth: 1)
+                    )
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
-            ColorPicker("", selection: Binding(
-                get: {
-                    Color(red: state.color.red, green: state.color.green, blue: state.color.blue)
-                },
-                set: { newValue in
-                    if let components = newValue.rgbaComponents {
-                        state.color = RGBAColor(
-                            red: Double(components.r),
-                            green: Double(components.g),
-                            blue: Double(components.b)
-                        )
-                        state.applyColorToSelected()
+            .frame(width: 46, height: 30)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("标注颜色")
+        .popover(isPresented: $showingColorPopover, arrowEdge: .bottom) {
+            VStack(spacing: 12) {
+                Text("标准颜色")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(34)), count: 4), spacing: 8) {
+                    ForEach(Array(RGBAColor.palette.enumerated()), id: \.offset) { index, paletteColor in
+                        Button {
+                            state.color = paletteColor
+                            state.applyColorToSelected()
+                            showingColorPopover = false
+                        } label: {
+                            Circle()
+                                .fill(Color(red: paletteColor.red, green: paletteColor.green, blue: paletteColor.blue))
+                                .frame(width: 26, height: 26)
+                                .overlay(
+                                    Circle().strokeBorder(
+                                        state.color == paletteColor ? Color.accentColor : Color.primary.opacity(0.15),
+                                        lineWidth: state.color == paletteColor ? 2 : 1
+                                    )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .help(Self.colorNames[index])
                     }
                 }
-            ), supportsOpacity: false)
-            .labelsHidden()
-            .help("自定义颜色")
-            .frame(width: 34)
+                Divider()
+                HStack(spacing: 8) {
+                    Text("自定义")
+                        .font(.callout)
+                    ColorPicker("", selection: Binding(
+                        get: {
+                            Color(red: state.color.red, green: state.color.green, blue: state.color.blue)
+                        },
+                        set: { newValue in
+                            if let components = newValue.rgbaComponents {
+                                state.color = RGBAColor(
+                                    red: Double(components.r),
+                                    green: Double(components.g),
+                                    blue: Double(components.b)
+                                )
+                                state.applyColorToSelected()
+                            }
+                        }
+                    ), supportsOpacity: false)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+            }
+            .padding(16)
         }
     }
 
-    // MARK: 线宽 / 字号
+    // MARK: 线宽 / 字号（下拉选择）
 
-    @ViewBuilder
-    private var sizeControls: some View {
-        if state.tool == .text {
-            HStack(spacing: 5) {
-                ForEach(Array(EditorState.fontSizePresets.enumerated()), id: \.offset) { index, _ in
-                    let titles = ["小", "中", "大"]
-                    Button {
-                        state.fontSizeIndex = index
-                        state.applyFontSizeToSelected()
-                    } label: {
-                        Text(titles[index])
-                            .font(.body)
-                            .frame(width: 30, height: 30)
-                    }
-                    .buttonStyle(.plain)
-                    .help("文字大小")
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(state.fontSizeIndex == index ? Color.accentColor.opacity(0.28) : Color.clear)
-                    )
-                }
-            }
-        } else {
-            HStack(spacing: 5) {
-                ForEach(Array(EditorState.lineWidthPresets.enumerated()), id: \.offset) { index, width in
-                    Button {
-                        state.lineWidthIndex = index
-                        state.applyLineWidthToSelected()
-                    } label: {
+    private var widthMenu: some View {
+        Menu {
+            ForEach(Array(EditorState.lineWidthPresets.enumerated()), id: \.offset) { index, width in
+                Button {
+                    state.lineWidthIndex = index
+                    state.applyLineWidthToSelected()
+                } label: {
+                    HStack {
                         Capsule()
                             .fill(Color.primary)
-                            .frame(width: 20, height: 4 + CGFloat(index) * 3.5)
-                            .frame(width: 34, height: 30)
+                            .frame(width: 26, height: 3 + CGFloat(index) * 3)
+                        Text("线宽 \(Int(width)) pt")
+                        if state.lineWidthIndex == index {
+                            Image(systemName: "checkmark")
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .help("线宽 \(Int(width)) pt")
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(state.lineWidthIndex == index ? Color.accentColor.opacity(0.28) : Color.clear)
-                    )
                 }
             }
+        } label: {
+            HStack(spacing: 5) {
+                Capsule()
+                    .fill(Color.primary)
+                    .frame(width: 18, height: 4 + CGFloat(state.lineWidthIndex) * 3)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 46, height: 30)
+            .contentShape(Rectangle())
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("线宽粗细")
+    }
+
+    private var fontSizeMenu: some View {
+        Menu {
+            ForEach(Array(EditorState.fontSizePresets.enumerated()), id: \.offset) { index, _ in
+                Button {
+                    state.fontSizeIndex = index
+                    state.applyFontSizeToSelected()
+                } label: {
+                    HStack {
+                        Text("字号 \(Self.fontSizeTitles[index])")
+                        if state.fontSizeIndex == index {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text("字号 \(Self.fontSizeTitles[state.fontSizeIndex])")
+                    .font(.system(size: 12))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(height: 30)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("文字大小（配合文字工具）")
     }
 
     // MARK: 撤销 / 重做 / 删除

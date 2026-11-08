@@ -18,8 +18,8 @@ enum EditorTool: String, CaseIterable, Identifiable {
         case .arrow: return "arrow.up.right"
         case .rectangle: return "rectangle"
         case .ellipse: return "circle"
-        case .text: return "textformat"
-        case .mosaic: return "squareshape.split.2x2"
+        case .text: return "t.square"
+        case .mosaic: return "square.grid.3x3.fill"
         }
     }
 
