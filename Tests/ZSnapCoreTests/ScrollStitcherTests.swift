@@ -83,6 +83,15 @@ final class ScrollStitcherTests: XCTestCase {
         XCTAssertEqual(result, .noNewContent, "上滚时已拼内容不受影响")
     }
 
+    func testDownscaleConversionReturnsFullResRows() {
+        // 回归测试：灰度空间匹配结果必须换算回全分辨率行号（曾因单位错位导致整屏重复）。
+        let previous = syntheticGray(seed: 5)
+        let shift = 20
+        let current = scrolledDown(from: previous, by: shift)
+        let result = ScrollStitcher.analyzeScroll(previous: previous, current: current, downscale: 2)
+        XCTAssertEqual(result, .append(fromRow: (height - shift) * 2))
+    }
+
     func testUnrelatedFramesAreUnreliable() {
         let previous = ScrollStitcher.GrayImage(
             width: width, height: height,

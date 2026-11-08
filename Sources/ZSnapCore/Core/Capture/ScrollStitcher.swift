@@ -54,19 +54,24 @@ enum ScrollStitcher {
     }
 
     /// 分析当前帧相对上一帧的新内容位置。
-    static func analyzeScroll(previous: GrayImage, current: GrayImage, bandRows: Int = 24) -> AppendResult {
+    /// - Parameters:
+    ///   - downscale: 灰度图的降采样系数，用于把匹配结果换算回全分辨率行号。
+    /// - Returns: `append(fromRow:)` 的行号基于**全分辨率**帧（y 向下）。
+    static func analyzeScroll(previous: GrayImage, current: GrayImage, downscale: Int = 1, bandRows: Int = 24) -> AppendResult {
         guard previous.width == current.width,
               previous.height >= bandRows,
-              current.height >= bandRows else { return .unreliable }
+              current.height >= bandRows,
+              downscale >= 1 else { return .unreliable }
 
-        let height = current.height
+        let grayHeight = current.height
+        let fullHeight = grayHeight * downscale
 
         // 主路径：上一帧底部横带（= 已拼内容最后一行）在当前帧中的位置。
         if let bottomBand = band(of: previous, range: (previous.height - bandRows)..<previous.height),
            let matchedRow = locateBand(bottomBand, in: current) {
-            // 新内容 = 匹配行 + bandRows 之后到帧底。
-            let appendStart = matchedRow + bandRows
-            if appendStart < height {
+            // 新内容 = 匹配行 + bandRows 之后到帧底（灰度空间），换算到全分辨率。
+            let appendStart = min(fullHeight, (matchedRow + bandRows) * downscale)
+            if appendStart < fullHeight {
                 return .append(fromRow: appendStart)
             }
             return .noNewContent
@@ -74,7 +79,7 @@ enum ScrollStitcher {
 
         // 备用路径：当前帧底部横带在上一帧中的位置。
         // 上滚/静止时必然能找到（内容仍在上一帧内）；找不到才是真缺口。
-        if let currentBottom = band(of: current, range: (height - bandRows)..<height),
+        if let currentBottom = band(of: current, range: (grayHeight - bandRows)..<grayHeight),
            let _ = locateBand(currentBottom, in: previous) {
             return .noNewContent
         }

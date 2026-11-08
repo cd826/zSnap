@@ -122,7 +122,8 @@ final class LongCaptureController {
         }
 
         // 锚定式分析：上一帧底带在当前帧中的位置决定新内容起点。
-        switch ScrollStitcher.analyzeScroll(previous: previous, current: gray) {
+        // 注意：匹配在灰度降采样空间进行，fromRow 已换算回全分辨率。
+        switch ScrollStitcher.analyzeScroll(previous: previous, current: gray, downscale: 2) {
         case .append(let fromRow):
             let appendCount = frame.height - fromRow
             let newTotal = coveredRows + appendCount
