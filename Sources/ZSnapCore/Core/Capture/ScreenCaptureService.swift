@@ -1,0 +1,110 @@
+import AppKit
+import ScreenCaptureKit
+
+/// 基于 ScreenCaptureKit 的截图服务（最低 macOS 14，SCScreenshotManager）。
+///
+/// 关键约束：
+/// - showsCursor = false：光标不得进入截图。
+/// - 快照在遮罩层显示之前获取（"冻结快照"方案），从根本上保证遮罩/工具栏不会截入图片。
+/// - 优先以 .best 捕获原生像素；若返回尺寸与显示器像素尺寸不符，回退为显式指定像素尺寸重试。
+final class ScreenCaptureService {
+    struct DisplaySnapshot {
+        let geometry: DisplayGeometry
+        let image: CGImage
+    }
+
+    enum CaptureError: LocalizedError {
+        case noDisplayCaptured
+
+        var errorDescription: String? {
+            switch self {
+            case .noDisplayCaptured:
+                return "未能获取任何显示器的截图内容。"
+            }
+        }
+    }
+
+    /// 抓取当前所有显示器的冻结快照（区域截图第一步）。
+    func captureAllDisplays() async throws -> [DisplaySnapshot] {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        var snapshots: [DisplaySnapshot] = []
+
+        for display in content.displays {
+            guard let screen = Self.nsscreen(forDisplayID: display.displayID) else {
+                Log.capture.warning("SCK 显示器 \(display.displayID) 未能匹配到 NSScreen，已跳过")
+                continue
+            }
+            let image = try await Self.captureDisplay(display, screen: screen)
+            snapshots.append(
+                DisplaySnapshot(
+                    geometry: DisplayGeometry(
+                        displayID: display.displayID,
+                        logicalFrame: screen.frame,
+                        scaleFactor: screen.backingScaleFactor,
+                        pixelSize: CGSize(width: image.width, height: image.height)
+                    ),
+                    image: image
+                )
+            )
+            Log.capture.info("已捕获显示器 \(display.displayID)：\(image.width)×\(image.height) px")
+        }
+
+        guard !snapshots.isEmpty else { throw CaptureError.noDisplayCaptured }
+        return snapshots
+    }
+
+    /// 抓取单个显示器的完整快照（全屏截图入口）。
+    func captureFullScreen(of screen: NSScreen) async throws -> CGImage {
+        guard let displayID = Self.displayID(of: screen) else {
+            throw CaptureError.noDisplayCaptured
+        }
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
+            throw CaptureError.noDisplayCaptured
+        }
+        return try await Self.captureDisplay(display, screen: screen)
+    }
+
+    // MARK: - Private
+
+    private static func captureDisplay(_ display: SCDisplay, screen: NSScreen) async throws -> CGImage {
+        let expectedPixelSize = CGSize(
+            width: screen.frame.width * screen.backingScaleFactor,
+            height: screen.frame.height * screen.backingScaleFactor
+        )
+
+        var image = try await captureImage(display: display, width: nil, height: nil)
+        if abs(CGFloat(image.width) - expectedPixelSize.width) > 1
+            || abs(CGFloat(image.height) - expectedPixelSize.height) > 1 {
+            let expectedWidth = Int(expectedPixelSize.width)
+            let expectedHeight = Int(expectedPixelSize.height)
+            Log.capture.warning("显示器 \(display.displayID) 返回尺寸 \(image.width)×\(image.height)，与预期 \(expectedWidth)×\(expectedHeight) 不符，改用显式像素尺寸重试")
+            image = try await captureImage(
+                display: display,
+                width: Int(expectedPixelSize.width),
+                height: Int(expectedPixelSize.height)
+            )
+        }
+        return image
+    }
+
+    private static func captureImage(display: SCDisplay, width: Int?, height: Int?) async throws -> CGImage {
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let configuration = SCStreamConfiguration()
+        configuration.showsCursor = false
+        configuration.captureResolution = .best
+        if let width, let height {
+            configuration.width = width
+            configuration.height = height
+        }
+        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+    }
+
+    static func displayID(of screen: NSScreen) -> UInt32? {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+    }
+
+    static func nsscreen(forDisplayID displayID: UInt32) -> NSScreen? {
+        NSScreen.screens.first { Self.displayID(of: $0) == displayID }
+    }
+}
