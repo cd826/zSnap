@@ -9,11 +9,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
 
-        coordinator.shortcutManager.registerRegionCapture { [weak self] in
+        coordinator.shortcutManager.registerRegionCapture(
+            keyCode: SettingsManager.regionHotkeyKeyCode,
+            modifiers: SettingsManager.regionHotkeyModifiers
+        ) { [weak self] in
             self?.coordinator.startRegionCapture()
         }
 
-        Log.app.info("zSnap 启动完成（Phase 0 技术验证版）")
+        // 设置页修改快捷键 → 重建菜单显示。
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(refreshMenu),
+            name: .zSnapMenuShouldRefresh,
+            object: nil
+        )
+
+        Log.app.info("zSnap 启动完成")
+    }
+
+    @objc private func refreshMenu() {
+        statusItem?.menu = MenuBuilder.buildMenu(coordinator: coordinator)
     }
 
     private func setupStatusItem() {

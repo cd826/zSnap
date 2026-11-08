@@ -19,6 +19,11 @@ enum WindowFrameConverter {
         )
     }
 
+    /// AppKit 全局 frame → CG 全局 frame（使用当前主屏高度；变换为自反映射）。
+    static func cgFrame(fromAppKitFrame appKitFrame: CGRect) -> CGRect {
+        Self.appKitFrame(fromCGRect: appKitFrame, primaryDisplayHeight: primaryDisplayHeight())
+    }
+
     static func appKitPoint(fromCGPoint cgPoint: CGPoint, primaryDisplayHeight: CGFloat) -> CGPoint {
         CGPoint(x: cgPoint.x, y: primaryDisplayHeight - cgPoint.y)
     }

@@ -23,7 +23,7 @@ final class ShortcutManager {
     private var eventHandler: EventHandlerRef?
     private var actions: [UInt32: () -> Void] = [:]
 
-    /// 注册"区域截图"快捷键，默认 ⌥A。
+    /// 注册"区域截图"快捷键。默认 ⌥A；重复调用会先注销旧键（设置页自定义用）。
     func registerRegionCapture(
         keyCode: UInt32 = UInt32(kVK_ANSI_A),
         modifiers: UInt32 = UInt32(optionKey),
@@ -35,12 +35,18 @@ final class ShortcutManager {
             installEventHandler()
         }
 
+        // 更换快捷键时先注销旧注册。
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+            self.hotKeyRef = nil
+        }
+
         var ref: EventHotKeyRef?
         let hotKeyID = EventHotKeyID(signature: Self.signature, id: HotKeyID.regionCapture)
         let status = RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &ref)
         if status == noErr {
             hotKeyRef = ref
-            Log.shortcut.info("已注册区域截图快捷键（默认 ⌥A）")
+            Log.shortcut.info("已注册区域截图快捷键")
         } else {
             Log.shortcut.error("RegisterEventHotKey 失败 status=\(status)")
         }

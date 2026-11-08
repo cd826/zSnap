@@ -6,8 +6,8 @@ import Carbon.HIToolbox
 /// 活动区域 = 拖拽选区（优先）或悬停窗口（智能点击预览）。
 @MainActor
 final class SelectionOverlayView: NSView {
-    /// 选区外压暗强度（0~1）。太透会导致选区与周围内容难以区分。
-    private static let dimmingAlpha: CGFloat = 0.65
+    /// 选区外压暗强度（0~1）。太透会导致选区与周围内容难以区分；可在设置中调整。
+    private let dimmingAlpha: CGFloat = CGFloat(SettingsManager.dimmingAlpha)
 
     var onMouseDown: ((CGPoint) -> Void)?
     var onMouseDragged: ((CGPoint) -> Void)?
@@ -77,7 +77,7 @@ final class SelectionOverlayView: NSView {
         }
 
         // 3. 活动区域外压暗。
-        NSColor.black.withAlphaComponent(Self.dimmingAlpha).setFill()
+        NSColor.black.withAlphaComponent(dimmingAlpha).setFill()
         for rect in RectMath.dimmingRects(inside: bounds, excluding: activeRect ?? .null) {
             rect.fill()
         }

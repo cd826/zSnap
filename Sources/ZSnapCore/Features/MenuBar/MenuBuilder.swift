@@ -9,16 +9,26 @@ enum MenuBuilder {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        // 区域截图 ⌥A
+        // 区域截图 ⌥A（默认，可在设置中自定义）
+        let hotkeyDisplay = SettingsManager.regionHotkeyDisplay
         let region = NSMenuItem(
-            title: "区域截图",
+            title: "区域截图（\(hotkeyDisplay)）",
             action: #selector(AppCoordinator.startRegionCaptureFromMenu),
-            keyEquivalent: "a"
+            keyEquivalent: ""
         )
-        region.keyEquivalentModifierMask = [.option]
         region.target = coordinator
         region.isEnabled = true
         menu.addItem(region)
+
+        // 长截图：框选区域后滚动页面自动拼接（Phase 4）
+        let longCapture = NSMenuItem(
+            title: "长截图",
+            action: #selector(AppCoordinator.startLongCaptureFromMenu),
+            keyEquivalent: ""
+        )
+        longCapture.target = coordinator
+        longCapture.isEnabled = true
+        menu.addItem(longCapture)
 
         // 全屏截图（按显示器列出）
         let fullscreenItem = NSMenuItem(title: "全屏截图", action: nil, keyEquivalent: "")
@@ -51,9 +61,14 @@ enum MenuBuilder {
 
         menu.addItem(.separator())
 
-        // 设置：Phase 5 提供
-        let settings = NSMenuItem(title: "设置…（Phase 5 提供）", action: nil, keyEquivalent: ",")
-        settings.isEnabled = false
+        // 设置（Phase 5）
+        let settings = NSMenuItem(
+            title: "设置…",
+            action: #selector(AppCoordinator.showSettingsFromMenu),
+            keyEquivalent: ","
+        )
+        settings.target = coordinator
+        settings.isEnabled = true
         menu.addItem(settings)
 
         menu.addItem(.separator())

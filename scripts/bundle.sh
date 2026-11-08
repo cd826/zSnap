@@ -32,6 +32,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <string>zSnap</string>
     <key>CFBundleExecutable</key>
     <string>zSnap</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.cd826.zSnap</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -41,9 +43,9 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>0.4.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>4</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
@@ -58,6 +60,11 @@ PLIST
 
 printf 'APPL????' > "$APP_DIR/Contents/PkgInfo"
 cp "$BIN" "$APP_DIR/Contents/MacOS/zSnap"
+
+# 应用图标（如存在则打入；生成方式：swift scripts/make_icon.swift）
+if [[ -f "Resources/AppIcon.icns" ]]; then
+  cp "Resources/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
+fi
 
 # 签名：优先级 ZSNAP_SIGN_IDENTITY 环境变量 > 自签名证书 zSnap Dev > ad-hoc。
 # 稳定签名身份可让屏幕录制授权在重建后保留（ad-hoc 每次重建哈希变化会导致授权失效）。

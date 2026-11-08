@@ -59,6 +59,13 @@ final class EditorCanvasView: NSView {
 
     // MARK: - 布局
 
+    /// 翻转视图（y 向下）：长图在滚动视图内从顶部开始展示。
+    override var isFlipped: Bool { true }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: max(1, displayRect.width), height: max(1, displayRect.height))
+    }
+
     override func layout() {
         super.layout()
         // 仅真实布局变化（bounds 改变）时回写 fitScale，供"100%"按钮换算。
@@ -68,12 +75,18 @@ final class EditorCanvasView: NSView {
     private func updateDisplayRect(updateFitScale: Bool) {
         let pixelSize = state.document.pixelSize
         guard pixelSize.width > 0, pixelSize.height > 0, bounds.width > 1, bounds.height > 1 else { return }
-        let fit = min(bounds.width / pixelSize.width, bounds.height / pixelSize.height)
+        // 适配基准 = 滚动视图可见区域（长图时不被自身大尺寸干扰）。
+        let visible = enclosingScrollView?.contentSize ?? bounds.size
+        let baseWidth = max(1, visible.width)
+        let baseHeight = max(1, visible.height)
+        let fit = min(baseWidth / pixelSize.width, baseHeight / pixelSize.height)
         let scale = fit * state.userZoom
         let size = CGSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
+        // 绘制统一发生在 y 向上空间：翻转视图中"贴顶" = y-up 空间贴底。
+        let y = bounds.height > size.height ? bounds.height - size.height : 0
         displayRect = CGRect(
             x: (bounds.width - size.width) / 2,
-            y: (bounds.height - size.height) / 2,
+            y: y,
             width: size.width,
             height: size.height
         )
@@ -81,6 +94,8 @@ final class EditorCanvasView: NSView {
         if updateFitScale {
             state.updateFitScale(fit)
         }
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
     }
 
     // MARK: - 绘制
@@ -93,6 +108,12 @@ final class EditorCanvasView: NSView {
         dirtyRect.fill()
 
         guard displayRect.width > 0 else { return }
+
+        // 翻转视图 → 统一切换到"y 向上"空间绘制，后续逻辑与坐标不变。
+        context.saveGState()
+        context.translateBy(x: 0, y: bounds.height)
+        context.scaleBy(x: 1, y: -1)
+        defer { context.restoreGState() }
 
         // 1. 原始图片（非翻转上下文直接绘制即正立）。
         context.interpolationQuality = .high
@@ -154,12 +175,13 @@ final class EditorCanvasView: NSView {
 
     // MARK: - 坐标换算
 
-    /// 事件 → 图片像素坐标（y 向下）。越界点不裁剪，便于拖拽连续性。
+    /// 事件 → 图片像素坐标（y 向下）。翻转视图的 y-down 局部坐标先转回 y-up 再映射。
     private func imagePoint(for event: NSEvent) -> CGPoint {
-        let windowPoint = convert(event.locationInWindow, from: nil)
+        let flippedPoint = convert(event.locationInWindow, from: nil)
+        let yUp = bounds.height - flippedPoint.y
         return CGPoint(
-            x: (windowPoint.x - displayRect.minX) / displayScale,
-            y: (displayRect.maxY - windowPoint.y) / displayScale
+            x: (flippedPoint.x - displayRect.minX) / displayScale,
+            y: (displayRect.maxY - yUp) / displayScale
         )
     }
 
@@ -168,12 +190,17 @@ final class EditorCanvasView: NSView {
         return CGPoint(x: imagePoint.x / size.width, y: imagePoint.y / size.height)
     }
 
-    /// 图片像素坐标 → 视图坐标（y 向上）。
+    /// 图片像素坐标 → 视图 y-up 坐标（用于绘制空间计算）。
     private func viewPoint(fromImage imagePoint: CGPoint) -> CGPoint {
         CGPoint(
             x: displayRect.minX + imagePoint.x * displayScale,
             y: displayRect.maxY - imagePoint.y * displayScale
         )
+    }
+
+    /// y-up 视图坐标 → 翻转视图坐标（用于子视图摆放）。
+    private func flippedPoint(fromUp point: CGPoint) -> CGPoint {
+        CGPoint(x: point.x, y: bounds.height - point.y)
     }
 
     // MARK: - 鼠标交互
@@ -287,7 +314,7 @@ final class EditorCanvasView: NSView {
 
         let field = NSTextField(frame: CGRect(
             x: viewOrigin.x,
-            y: viewOrigin.y - fieldHeight,
+            y: flippedPoint(fromUp: viewOrigin).y - fieldHeight,
             width: fieldWidth,
             height: fieldHeight
         ))
@@ -343,7 +370,11 @@ final class EditorCanvasView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        // 滚轮缩放（截图编辑器惯例）。
+        // ⌘+滚轮缩放；普通滚轮交给滚动视图（长图浏览）。
+        guard event.modifierFlags.contains(.command) else {
+            super.scrollWheel(with: event)
+            return
+        }
         let delta = -event.scrollingDeltaY * 0.002
         if abs(delta) > 0.0001 {
             state.applyZoomDelta(1 + delta)

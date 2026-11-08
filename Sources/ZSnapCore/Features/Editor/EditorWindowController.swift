@@ -62,6 +62,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
     }
 
+    /// 进入编辑器时的一次性提示（如长截图缺口告警）。
+    func showNotice(_ text: String) {
+        state.flash(text)
+    }
+
     func windowWillClose(_ notification: Notification) {
         onClose()
     }
@@ -122,15 +127,25 @@ struct EditorRootView: View {
 struct EditorCanvasRepresentable: NSViewRepresentable {
     let state: EditorState
 
-    func makeNSView(context: Context) -> EditorCanvasView {
-        let view = EditorCanvasView(state: state)
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = .underPageBackgroundColor
+        scrollView.allowsMagnification = false
+
+        let canvas = EditorCanvasView(state: state)
+        scrollView.documentView = canvas
         DispatchQueue.main.async {
-            view.window?.makeFirstResponder(view)
+            canvas.window?.makeFirstResponder(canvas)
         }
-        return view
+        return scrollView
     }
 
-    func updateNSView(_ nsView: EditorCanvasView, context: Context) {}
+    func updateNSView(_ nsView: NSScrollView, context: Context) {}
 }
 
 // MARK: - 工具栏
@@ -148,6 +163,8 @@ struct EditorToolbarView: View {
             toolbarDivider
             sizeControls
             toolbarDivider
+            zoomButtons
+            toolbarDivider
             historyButtons
             toolbarDivider
             outputButtons
@@ -155,6 +172,32 @@ struct EditorToolbarView: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 11)
         .background(.bar)
+    }
+
+    // MARK: 缩放
+
+    private var zoomButtons: some View {
+        HStack(spacing: 4) {
+            Button {
+                state.zoomToFit()
+            } label: {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    .imageScale(.large)
+                    .frame(width: 34, height: 30)
+            }
+            .buttonStyle(.plain)
+            .help("适应窗口")
+
+            Button {
+                state.zoomToActual()
+            } label: {
+                Text("1:1")
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(width: 34, height: 30)
+            }
+            .buttonStyle(.plain)
+            .help("实际大小（⌘+滚轮亦可缩放）")
+        }
     }
 
     private var toolbarDivider: some View {

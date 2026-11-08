@@ -72,6 +72,39 @@ final class ScreenCaptureService {
         return try await Self.captureDisplay(display, screen: screen)
     }
 
+    /// 抓取显示器快照并排除指定 AppKit 窗口（长截图 HUD 用，保证 HUD 不入帧）。
+    /// - Parameter excludingPanelFrame: 需要排除的自身面板的 AppKit 全局 frame（可为 nil）。
+    func captureFullScreen(of screen: NSScreen, excludingPanelFrame: CGRect) async throws -> CGImage {
+        guard let displayID = Self.displayID(of: screen) else {
+            throw CaptureError.noDisplayCaptured
+        }
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
+            throw CaptureError.noDisplayCaptured
+        }
+        let cgFrame = WindowFrameConverter.cgFrame(fromAppKitFrame: excludingPanelFrame)
+        let excluded = content.windows.filter { window in
+            guard window.owningApplication?.processID == pid_t(getpid()) else { return false }
+            return abs(window.frame.minX - cgFrame.minX) <= 1
+                && abs(window.frame.minY - cgFrame.minY) <= 1
+                && abs(window.frame.width - cgFrame.width) <= 1
+                && abs(window.frame.height - cgFrame.height) <= 1
+        }
+        if excluded.isEmpty {
+            Log.capture.warning("未能匹配到需排除的自身窗口，该帧可能包含 HUD")
+            return try await Self.captureDisplay(display, screen: screen)
+        }
+        let expectedPixelSize = CGSize(
+            width: screen.frame.width * screen.backingScaleFactor,
+            height: screen.frame.height * screen.backingScaleFactor
+        )
+        let filter = SCContentFilter(display: display, excludingWindows: excluded)
+        let configuration = Self.baseConfiguration()
+        configuration.width = Int(expectedPixelSize.width)
+        configuration.height = Int(expectedPixelSize.height)
+        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+    }
+
     /// 截取窗口自身内容（desktopIndependentWindow）：
     /// 即使窗口被部分遮挡也能截取完整内容，且不含窗口阴影。
     /// - Parameter scale: 窗口所在显示器的缩放系数，决定输出像素密度。
@@ -110,11 +143,16 @@ final class ScreenCaptureService {
         return image
     }
 
-    private static func captureImage(display: SCDisplay, width: Int?, height: Int?) async throws -> CGImage {
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+    private static func baseConfiguration() -> SCStreamConfiguration {
         let configuration = SCStreamConfiguration()
         configuration.showsCursor = false
         configuration.captureResolution = .best
+        return configuration
+    }
+
+    private static func captureImage(display: SCDisplay, width: Int?, height: Int?) async throws -> CGImage {
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let configuration = baseConfiguration()
         if let width, let height {
             configuration.width = width
             configuration.height = height

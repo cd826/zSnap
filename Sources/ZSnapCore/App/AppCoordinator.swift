@@ -14,6 +14,10 @@ final class AppCoordinator: NSObject {
     private var selectionController: SelectionOverlayController?
     private var editorController: EditorWindowController?
     private var permissionController: PermissionWindowController?
+    private var settingsController: SettingsWindowController?
+    private var longCaptureController: LongCaptureController?
+    /// 本次选区是否用于长截图（决定选区完成后的去向）。
+    private var longCapturePending = false
 
     // MARK: - 状态转换
 
@@ -63,6 +67,23 @@ final class AppCoordinator: NSObject {
         }
     }
 
+    /// 长截图入口：框选区域后进入滚动拼接会话（Phase 4）。
+    func startLongCapture() {
+        guard state == .idle else {
+            Log.app.notice("忽略重复触发，当前状态 \(self.state.description)")
+            return
+        }
+        guard ScreenRecordingPermission.isGranted else {
+            showPermissionGuidance()
+            return
+        }
+        longCapturePending = true
+        transition(to: .selecting)
+        Task { [weak self] in
+            await self?.runRegionCapture()
+        }
+    }
+
     private func beginSelection(with session: ScreenCaptureService.CaptureSession) {
         // 窗口列表在覆盖层创建之前枚举（此时自身覆盖窗口还未上屏）。
         let windowList = WindowListService.currentWindows()
@@ -70,7 +91,14 @@ final class AppCoordinator: NSObject {
             snapshots: session.snapshots,
             windows: windowList,
             onFinish: { [weak self] globalRect, snapshot in
-                self?.completeSelection(globalRect: globalRect, snapshot: snapshot)
+                guard let self else { return }
+                if self.longCapturePending {
+                    self.longCapturePending = false
+                    let screen = ScreenCaptureService.nsscreen(forDisplayID: snapshot.geometry.displayID) ?? NSScreen.main
+                    self.beginLongSession(regionRect: globalRect, geometry: snapshot.geometry, screen: screen)
+                } else {
+                    self.completeSelection(globalRect: globalRect, snapshot: snapshot)
+                }
             },
             onWindowCapture: { [weak self] windowInfo in
                 self?.completeWindowCapture(windowInfo, session: session)
@@ -78,12 +106,48 @@ final class AppCoordinator: NSObject {
             onCancel: { [weak self] in
                 guard let self else { return }
                 self.selectionController = nil
+                self.longCapturePending = false
                 self.transition(to: .idle)
             }
         )
         selectionController = controller
         controller.begin()
     }
+
+    /// 长截图拼接会话：基于框选区域滚动抓帧（Phase 4）。
+    private func beginLongSession(regionRect: CGRect, geometry: DisplayGeometry, screen: NSScreen?) {
+        selectionController = nil
+        guard let screen else {
+            transition(to: .idle)
+            presentError("长截图失败：无法定位显示器。")
+            return
+        }
+        let controller = LongCaptureController(
+            regionRect: regionRect,
+            geometry: geometry,
+            screen: screen,
+            onFinish: { [weak self] image, warning in
+                guard let self else { return }
+                self.longCaptureController = nil
+                guard let image else {
+                    self.transition(to: .idle)
+                    return
+                }
+                Log.app.info("长截图完成：\(image.width)×\(image.height) px")
+                if let warning {
+                    self.longCaptureWarning = warning
+                } else {
+                    self.longCaptureWarning = nil
+                }
+                self.showEditor(image: image, logicalSize: regionRect.size)
+            }
+        )
+        longCaptureController = controller
+        controller.start()
+    }
+
+    /// 长截图已知告警（如出现缺口），进入编辑器时提示一次。
+    private var longCaptureWarning: String?
 
     private func completeSelection(globalRect: CGRect, snapshot: ScreenCaptureService.DisplaySnapshot) {
         selectionController = nil
@@ -232,6 +296,10 @@ final class AppCoordinator: NSObject {
         editorController = controller
         transition(to: .editing)
         controller.show()
+        if let longCaptureWarning {
+            controller.showNotice(longCaptureWarning)
+            self.longCaptureWarning = nil
+        }
     }
 
     // MARK: - 权限引导
@@ -253,8 +321,42 @@ final class AppCoordinator: NSObject {
         startRegionCapture()
     }
 
+    @objc func startLongCaptureFromMenu() {
+        startLongCapture()
+    }
+
+    @objc func showSettingsFromMenu() {
+        showSettings()
+    }
+
     @objc func captureFullScreenFromMenu(_ sender: NSMenuItem) {
         guard let screen = sender.representedObject as? NSScreen else { return }
         captureFullScreen(of: screen)
     }
+
+    // MARK: - 设置（Phase 5）
+
+    func showSettings() {
+        let controller = settingsController ?? SettingsWindowController(onHotkeyChanged: { [weak self] in
+            self?.applyHotkeySettings()
+        })
+        settingsController = controller
+        controller.show()
+    }
+
+    /// 设置页修改快捷键后：重新注册全局热键并刷新菜单显示。
+    func applyHotkeySettings() {
+        shortcutManager.registerRegionCapture(
+            keyCode: SettingsManager.regionHotkeyKeyCode,
+            modifiers: SettingsManager.regionHotkeyModifiers
+        ) { [weak self] in
+            self?.startRegionCapture()
+        }
+        NotificationCenter.default.post(name: .zSnapMenuShouldRefresh, object: nil)
+        Log.app.info("区域截图快捷键已更新为 \(SettingsManager.regionHotkeyDisplay, privacy: .public)")
+    }
+}
+
+extension Notification.Name {
+    static let zSnapMenuShouldRefresh = Notification.Name("com.cd826.zSnap.menuShouldRefresh")
 }
