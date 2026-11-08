@@ -11,7 +11,7 @@ final class AppCoordinator: NSObject {
     private let captureService = ScreenCaptureService()
 
     private var selectionController: SelectionOverlayController?
-    private var previewController: SnapshotPreviewController?
+    private var editorController: EditorWindowController?
     private var permissionController: PermissionWindowController?
 
     // MARK: - 状态转换
@@ -37,11 +37,10 @@ final class AppCoordinator: NSObject {
     // MARK: - 区域截图
 
     func startRegionCapture() {
-        guard state == .idle || state == .presentingResult else {
+        guard state == .idle else {
             Log.app.notice("忽略重复触发，当前状态 \(self.state.description)")
             return
         }
-        closePreviewIfNeeded()
 
         guard ScreenRecordingPermission.isGranted else {
             showPermissionGuidance()
@@ -98,7 +97,7 @@ final class AppCoordinator: NSObject {
         Log.app.info(
             "裁剪完成：\(Int(globalRect.width))×\(Int(globalRect.height)) pt → \(cropped.width)×\(cropped.height) px"
         )
-        showPreview(image: cropped, logicalSize: globalRect.size)
+        showEditor(image: cropped, logicalSize: globalRect.size)
     }
 
     // MARK: - 窗口截图
@@ -133,7 +132,7 @@ final class AppCoordinator: NSObject {
                     image = cropped
                     logicalSize = size
                 }
-                self.showPreview(image: image, logicalSize: logicalSize)
+                self.showEditor(image: image, logicalSize: logicalSize)
             } catch {
                 self.transition(to: .idle)
                 self.presentError("窗口截图失败：\(error.localizedDescription)")
@@ -184,14 +183,13 @@ final class AppCoordinator: NSObject {
         return (cropped, window.appKitFrame.size)
     }
 
-    // MARK: - 全屏截图（Phase 0 验证入口）
+    // MARK: - 全屏截图
 
     func captureFullScreen(of screen: NSScreen) {
-        guard state == .idle || state == .presentingResult else {
+        guard state == .idle else {
             Log.app.notice("忽略重复触发，当前状态 \(self.state.description)")
             return
         }
-        closePreviewIfNeeded()
 
         guard ScreenRecordingPermission.isGranted else {
             showPermissionGuidance()
@@ -204,7 +202,7 @@ final class AppCoordinator: NSObject {
             do {
                 let image = try await self.captureService.captureFullScreen(of: targetScreen)
                 Log.app.info("全屏截图完成：\(image.width)×\(image.height) px")
-                self.showPreview(image: image, logicalSize: targetScreen.frame.size)
+                self.showEditor(image: image, logicalSize: targetScreen.frame.size)
             } catch {
                 self.transition(to: .idle)
                 self.presentError("全屏截图失败：\(error.localizedDescription)")
@@ -212,28 +210,19 @@ final class AppCoordinator: NSObject {
         }
     }
 
-    // MARK: - 预览
+    // MARK: - 编辑器
 
-    private func showPreview(image: CGImage, logicalSize: CGSize) {
-        let controller = SnapshotPreviewController(
-            image: image,
-            title: "zSnap 预览 — \(image.width)×\(image.height) px",
-            preferredSize: logicalSize,
-            onClose: { [weak self] in
-                guard let self else { return }
-                self.previewController = nil
-                self.transition(to: .idle)
-            }
-        )
-        previewController = controller
-        transition(to: .presentingResult)
+    /// 截图完成后进入统一编辑器（需求 4.1 / 7.2：普通截图与长截图共用）。
+    private func showEditor(image: CGImage, logicalSize: CGSize) {
+        let document = ScreenshotDocument(image: image, logicalSize: logicalSize)
+        let controller = EditorWindowController(document: document, onClose: { [weak self] in
+            guard let self else { return }
+            self.editorController = nil
+            self.transition(to: .idle)
+        })
+        editorController = controller
+        transition(to: .editing)
         controller.show()
-    }
-
-    private func closePreviewIfNeeded() {
-        guard let preview = previewController else { return }
-        previewController = nil
-        preview.close()
     }
 
     // MARK: - 权限引导

@@ -12,6 +12,20 @@ enum RectMath {
         )
     }
 
+    /// 点到线段的最短距离（用于箭头等线状标注的命中测试）。
+    static func distance(from point: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
+        let abx = b.x - a.x
+        let aby = b.y - a.y
+        let apx = point.x - a.x
+        let apy = point.y - a.y
+        let abLengthSquared = abx * abx + aby * aby
+        guard abLengthSquared > 0 else { return hypot(apx, apy) }
+        let t = max(0, min(1, (apx * abx + apy * aby) / abLengthSquared))
+        let cx = a.x + abx * t
+        let cy = a.y + aby * t
+        return hypot(point.x - cx, point.y - cy)
+    }
+
     /// 是否小到应视为点击（用于"点一下即截取该屏全屏"的手势语义）。
     static func isTapTooSmall(_ rect: CGRect, threshold: CGFloat) -> Bool {
         rect.width < threshold || rect.height < threshold
