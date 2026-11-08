@@ -22,7 +22,6 @@ final class LongCaptureController {
     private var isCapturingFrame = false
     private var canvasImage: CGImage?
     private var coveredRows = 0             // 内容方向已覆盖行数（图片像素）
-    private var scrollAccum = 0             // 当前帧相对首帧的内容偏移 S
     private var lastFrameGray: ScrollStitcher.GrayImage?
     private var lastFrame: CGImage?
     private var frameCount = 0
@@ -118,59 +117,54 @@ final class LongCaptureController {
         guard let previous = lastFrameGray, canvasImage != nil else {
             canvasImage = frame
             coveredRows = frame.height
-            scrollAccum = 0
             updateHUD()
             return
         }
 
-        guard let s = ScrollStitcher.estimateScrollOffset(previous: previous, current: gray) else {
-            updateHUD() // 匹配不可信，跳过该帧（不推进偏移）。
-            return
-        }
-        scrollAccum = max(0, scrollAccum + s)
-
-        let newTotal = scrollAccum + frame.height
-        guard newTotal > coveredRows else {
-            updateHUD() // 无新内容。
-            return
-        }
-
-        // 缺口：新帧顶部越过了已覆盖范围（滚动过快）。跳过并提示，用户回滚可补拍。
-        if scrollAccum > coveredRows {
+        // 锚定式分析：上一帧底带在当前帧中的位置决定新内容起点。
+        switch ScrollStitcher.analyzeScroll(previous: previous, current: gray) {
+        case .append(let fromRow):
+            let appendCount = frame.height - fromRow
+            let newTotal = coveredRows + appendCount
+            // 超高保护。
+            if newTotal > Self.maxStitchedPixels {
+                Log.capture.warning("长截图达到高度上限 \(Self.maxStitchedPixels) px，自动完成")
+                finish()
+                return
+            }
+            appendSlice(
+                from: frame,
+                rect: CGRect(x: 0, y: fromRow, width: frame.width, height: appendCount)
+            )
+            gapDetected = false
+        case .noNewContent:
+            gapDetected = false
+        case .unreliable:
+            // 底带滚出画面（滚动过快）或画面突变：跳过并提示，回滚可补拍。
             gapDetected = true
-            updateHUD()
-            return
         }
+        updateHUD()
+    }
 
-        // 超高保护。
-        if newTotal > Self.maxStitchedPixels {
-            Log.capture.warning("长截图达到高度上限 \(Self.maxStitchedPixels) px，自动完成")
-            finish()
-            return
-        }
-
-        // 增量拼接：新帧中 (coveredRows - scrollAccum) .. 帧底部 的行是新内容。
-        let sourceStartRow = coveredRows - scrollAccum
-        let sliceHeight = newTotal - coveredRows
-        let sliceRect = CGRect(x: 0, y: sourceStartRow, width: frame.width, height: sliceHeight)
-        guard let slice = frame.cropping(to: sliceRect) else { return }
-
-        let newHeight = newTotal
+    /// 把 frame 中的 rect 区域增量拼接到画布底部（重建画布）。
+    private func appendSlice(from frame: CGImage, rect: CGRect) {
+        guard rect.width > 0, rect.height > 0,
+              let slice = frame.cropping(to: rect) else { return }
+        let newTotal = coveredRows + Int(rect.height)
         let width = frame.width
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(
-                  data: nil, width: width, height: newHeight, bitsPerComponent: 8, bytesPerRow: 0,
+                  data: nil, width: width, height: newTotal, bitsPerComponent: 8, bytesPerRow: 0,
                   space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
               ) else { return }
 
-        // 旧画布放在顶部（位图上下文 y 向上：内容第 0 行应对应位图最顶行）。
+        // 位图上下文 y 向上：内容第 0 行对应位图最顶行。
         context.interpolationQuality = .high
-        context.draw(canvasImage!, in: CGRect(x: 0, y: CGFloat(newHeight - coveredRows), width: CGFloat(width), height: CGFloat(coveredRows)))
-        context.draw(slice, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(sliceHeight)))
+        context.draw(canvasImage!, in: CGRect(x: 0, y: CGFloat(newTotal - coveredRows), width: CGFloat(width), height: CGFloat(coveredRows)))
+        context.draw(slice, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: rect.height))
 
         canvasImage = context.makeImage()
         coveredRows = newTotal
-        updateHUD()
     }
 
     private func updateHUD() {

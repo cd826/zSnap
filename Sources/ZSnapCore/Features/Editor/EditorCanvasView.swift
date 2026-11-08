@@ -49,6 +49,35 @@ final class EditorCanvasView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    private var clipViewFrameObserver: NSObjectProtocol?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let clipViewFrameObserver {
+            NotificationCenter.default.removeObserver(clipViewFrameObserver)
+            self.clipViewFrameObserver = nil
+        }
+        guard let scrollView = enclosingScrollView else { return }
+        // 窗口/分栏尺寸变化 → 重新适配（监听裁剪视图 frame 变化；滚动不触发）。
+        scrollView.contentView.postsFrameChangedNotifications = true
+        clipViewFrameObserver = NotificationCenter.default.addObserver(
+            forName: NSView.frameDidChangeNotification,
+            object: scrollView.contentView,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.updateDisplayRect(updateFitScale: true)
+            }
+        }
+        updateDisplayRect(updateFitScale: true)
+    }
+
+    deinit {
+        if let clipViewFrameObserver {
+            NotificationCenter.default.removeObserver(clipViewFrameObserver)
+        }
+    }
+
     /// 状态变化（工具/颜色/缩放等）→ 重绘并按新参数重排显示区域。
     /// 注意：绝不在该路径写回任何 @Published 属性——objectWillChange 发出时新值尚未写入，
     /// 同步写回会造成守卫失效 + 无限递归（Phase 2 首版崩溃根因）。
@@ -74,19 +103,31 @@ final class EditorCanvasView: NSView {
 
     private func updateDisplayRect(updateFitScale: Bool) {
         let pixelSize = state.document.pixelSize
-        guard pixelSize.width > 0, pixelSize.height > 0, bounds.width > 1, bounds.height > 1 else { return }
-        // 适配基准 = 滚动视图可见区域（长图时不被自身大尺寸干扰）。
-        let visible = enclosingScrollView?.contentSize ?? bounds.size
-        let baseWidth = max(1, visible.width)
-        let baseHeight = max(1, visible.height)
-        let fit = min(baseWidth / pixelSize.width, baseHeight / pixelSize.height)
+        // 适配基准 = 滚动视图可视区域（NSScrollView 不会自动设定 documentView 尺寸，
+        // 必须由此处显式管理 frame，否则画布为 0 尺寸 → 黑屏）。
+        var visible = enclosingScrollView?.contentSize ?? .zero
+        if visible.width < 2 || visible.height < 2 {
+            visible = bounds.size
+        }
+        guard pixelSize.width > 0, pixelSize.height > 0, visible.width > 1, visible.height > 1 else { return }
+
+        let fit = min(visible.width / pixelSize.width, visible.height / pixelSize.height)
         let scale = fit * state.userZoom
         let size = CGSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
-        // 绘制统一发生在 y 向上空间：翻转视图中"贴顶" = y-up 空间贴底。
-        let y = bounds.height > size.height ? bounds.height - size.height : 0
+
+        // 文档视图尺寸 = max(图片显示尺寸, 可视区域)：图小于视口时居中，大图可滚动。
+        let newSize = NSSize(
+            width: max(size.width, visible.width),
+            height: max(size.height, visible.height)
+        )
+        if frame.size != newSize {
+            setFrameSize(newSize) // 触发 layout，重入时尺寸相同自然收敛。
+        }
+
+        // 绘制统一在 y-up 空间：图片在文档视图中居中。
         displayRect = CGRect(
             x: (bounds.width - size.width) / 2,
-            y: y,
+            y: (bounds.height - size.height) / 2,
             width: size.width,
             height: size.height
         )

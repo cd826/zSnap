@@ -3,14 +3,14 @@ import Foundation
 
 /// 长截图拼接核心（纯逻辑，可单元测试）。
 ///
-/// 原理：用户手动滚动页面，按固定间隔抓帧；对相邻两帧做垂直模板匹配
-/// （取上一帧中部横带，在新帧中寻找差异最小的位置），得到滚动位移，
-/// 再把新帧中"尚未覆盖"的行增量拼接到结果画布上。
+/// 锚定式拼接：取上一帧底部横带（= 已拼接内容的最后一行）在新帧中垂直定位，
+/// 该位置以下的行即为新内容。每帧直接锚定已拼内容，误差不逐帧累积；
+/// 静止帧天然判定为"无新内容"（零追加），上滚由顶部横带回溯判定。
 ///
 /// 已知边界（记录于 Phase 4 报告）：
 /// - 纯平移假设：吸顶/悬浮元素会造成重复带；
-/// - 滚动过快出现内容缺口时，该帧被跳过并提示用户回滚补拍；
-/// - 动态加载/渐变空白区可能匹配失败（阈值保护）。
+/// - 大面积空白区的定位存在歧义（视觉上通常无缝，但内容重现时可能错位）；
+/// - 底带完全滚出画面 = 缺口（.unreliable），需回滚补拍。
 enum ScrollStitcher {
     /// 8-bit 灰度图（内存行 0 = 图片顶部，y 向下）。
     struct GrayImage {
@@ -19,8 +19,18 @@ enum ScrollStitcher {
         var pixels: [UInt8]
     }
 
+    /// 单帧分析结果。
+    enum AppendResult: Equatable {
+        /// 从该行到帧底都是新内容（行号基于当前帧，y 向下）。
+        case append(fromRow: Int)
+        /// 静止或上滚，无新内容。
+        case noNewContent
+        /// 定位不可信（底带滚出画面 / 画面突变）→ 缺口，建议回滚。
+        case unreliable
+    }
+
     /// 把 CGImage 降采样为灰度图（匹配用，降低计算量）。
-    static func grayscale(from image: CGImage, downscale: Int = 4) -> GrayImage? {
+    static func grayscale(from image: CGImage, downscale: Int = 2) -> GrayImage? {
         let width = max(1, image.width / downscale)
         let height = max(1, image.height / downscale)
         var pixels = [UInt8](repeating: 0, count: width * height)
@@ -43,25 +53,61 @@ enum ScrollStitcher {
         return GrayImage(width: width, height: height, pixels: pixels)
     }
 
-    /// 估算相邻帧的垂直滚动位移。
-    /// - Returns: 正值 = 内容上移（用户向下滚动）；负值 = 上滚；nil = 匹配不可信。
-    static func estimateScrollOffset(previous: GrayImage, current: GrayImage, templateRows: Int = 24) -> Int? {
+    /// 分析当前帧相对上一帧的新内容位置。
+    static func analyzeScroll(previous: GrayImage, current: GrayImage, bandRows: Int = 24) -> AppendResult {
         guard previous.width == current.width,
-              previous.height >= templateRows * 2,
-              current.height >= templateRows else { return nil }
+              previous.height >= bandRows,
+              current.height >= bandRows else { return .unreliable }
 
-        let width = previous.width
-        let y0 = previous.height / 2
+        let height = current.height
 
+        // 主路径：上一帧底部横带（= 已拼内容最后一行）在当前帧中的位置。
+        if let bottomBand = band(of: previous, range: (previous.height - bandRows)..<previous.height),
+           let matchedRow = locateBand(bottomBand, in: current) {
+            // 新内容 = 匹配行 + bandRows 之后到帧底。
+            let appendStart = matchedRow + bandRows
+            if appendStart < height {
+                return .append(fromRow: appendStart)
+            }
+            return .noNewContent
+        }
+
+        // 备用路径：当前帧底部横带在上一帧中的位置。
+        // 上滚/静止时必然能找到（内容仍在上一帧内）；找不到才是真缺口。
+        if let currentBottom = band(of: current, range: (height - bandRows)..<height),
+           let _ = locateBand(currentBottom, in: previous) {
+            return .noNewContent
+        }
+
+        return .unreliable
+    }
+
+    // MARK: - 内部
+
+    /// 水平横带裁剪。
+    static func band(of image: GrayImage, range: Range<Int>) -> GrayImage? {
+        guard range.lowerBound >= 0, range.upperBound <= image.height, !range.isEmpty else { return nil }
+        let start = range.lowerBound * image.width
+        let count = range.count * image.width
+        return GrayImage(width: image.width, height: range.count, pixels: Array(image.pixels[start..<(start + count)]))
+    }
+
+    /// 在 image 中垂直搜索与 template 逐像素差异最小的行，返回行号；差异过大返回 nil。
+    static func locateBand(_ template: GrayImage, in image: GrayImage) -> Int? {
+        guard template.width == image.width,
+              image.height >= template.height,
+              !template.pixels.isEmpty else { return nil }
+
+        let width = template.width
         var bestRow = -1
         var bestDiff = Int.max
-        for candidateRow in 0...(current.height - templateRows) {
+        for candidateRow in 0...(image.height - template.height) {
             var diff = 0
-            for i in 0..<templateRows {
-                let previousRow = (y0 + i) * width
-                let currentRow = (candidateRow + i) * width
+            for i in 0..<template.height {
+                let templateRow = i * width
+                let imageRow = (candidateRow + i) * width
                 for x in 0..<width {
-                    diff += abs(Int(current.pixels[currentRow + x]) - Int(previous.pixels[previousRow + x]))
+                    diff += abs(Int(image.pixels[imageRow + x]) - Int(template.pixels[templateRow + x]))
                 }
             }
             if diff < bestDiff {
@@ -71,9 +117,10 @@ enum ScrollStitcher {
         }
         guard bestRow >= 0 else { return nil }
 
-        // 归一化差异过大说明画面突变/无重叠，该帧不可信。
-        let perPixel = Double(bestDiff) / Double(templateRows * width)
-        guard perPixel < 24 else { return nil }
-        return y0 - bestRow
+        // 归一化差异过大说明画面突变/无重叠，定位不可信。
+        // 真匹配（同内容重采样）差异 ≤8；无关内容噪声底 ≥20。
+        let perPixel = Double(bestDiff) / Double(template.height * width)
+        guard perPixel < 16 else { return nil }
+        return bestRow
     }
 }
