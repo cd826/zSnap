@@ -103,5 +103,4 @@ scripts/             # bundle.sh（打包）/ make_icon.swift（图标）
 
 ## 文档
 
-- [需求文档](docs/zSnap截图效率工具开发总需求文档.md)
-- [Phase 0 技术验证](docs/phase0-report.md) / [Phase 1 基础截图](docs/phase1-report.md) / [Phase 2 截图标注](docs/phase2-report.md) / [Phase 4+5 长截图与完善](docs/phase4-5-report.md)
+需求文档与 Phase 0–5 各阶段验收报告存放在本地 `docs/` 目录（不入库，仅在开发机保留）。
