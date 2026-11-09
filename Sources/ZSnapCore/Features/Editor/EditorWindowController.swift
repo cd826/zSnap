@@ -165,8 +165,8 @@ struct EditorToolbarView: View {
             toolButtons
             toolbarDivider
             colorMenuButton
-            widthMenu
-            fontSizeMenu
+            widthPicker
+            fontSizePicker
             toolbarDivider
             zoomButtons
             toolbarDivider
@@ -201,7 +201,14 @@ struct EditorToolbarView: View {
                     .frame(width: 34, height: 30)
             }
             .buttonStyle(.plain)
-            .help("实际大小（⌘+滚轮亦可缩放）")
+            .help("实际大小（1 图片像素 = 1 屏幕点；⌘+滚轮亦可缩放）")
+
+            Text(state.zoomLabel)
+                .font(.system(size: 11))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 40)
+                .help("当前显示比例")
         }
     }
 
@@ -308,73 +315,49 @@ struct EditorToolbarView: View {
         }
     }
 
-    // MARK: 线宽 / 字号（下拉选择）
+    // MARK: 线宽 / 字号（原生下拉选择）
 
-    private var widthMenu: some View {
-        Menu {
+    private var widthPicker: some View {
+        Picker(selection: Binding(
+            get: { state.lineWidthIndex },
+            set: { newValue in
+                state.lineWidthIndex = newValue
+                state.applyLineWidthToSelected()
+            }
+        )) {
             ForEach(Array(EditorState.lineWidthPresets.enumerated()), id: \.offset) { index, width in
-                Button {
-                    state.lineWidthIndex = index
-                    state.applyLineWidthToSelected()
-                } label: {
-                    HStack {
-                        Capsule()
-                            .fill(Color.primary)
-                            .frame(width: 26, height: 3 + CGFloat(index) * 3)
-                        Text("线宽 \(Int(width)) pt")
-                        if state.lineWidthIndex == index {
-                            Image(systemName: "checkmark")
-                        }
-                    }
+                HStack(spacing: 6) {
+                    Capsule()
+                        .fill(Color.primary)
+                        .frame(width: 26, height: 3 + CGFloat(index) * 3)
+                    Text("线宽 \(Int(width)) pt")
                 }
+                .tag(index)
             }
         } label: {
-            HStack(spacing: 5) {
-                Capsule()
-                    .fill(Color.primary)
-                    .frame(width: 18, height: 4 + CGFloat(state.lineWidthIndex) * 3)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(width: 46, height: 30)
-            .contentShape(Rectangle())
+            EmptyView()
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
+        .pickerStyle(.menu)
+        .frame(width: 118)
         .help("线宽粗细")
     }
 
-    private var fontSizeMenu: some View {
-        Menu {
+    private var fontSizePicker: some View {
+        Picker(selection: Binding(
+            get: { state.fontSizeIndex },
+            set: { newValue in
+                state.fontSizeIndex = newValue
+                state.applyFontSizeToSelected()
+            }
+        )) {
             ForEach(Array(EditorState.fontSizePresets.enumerated()), id: \.offset) { index, _ in
-                Button {
-                    state.fontSizeIndex = index
-                    state.applyFontSizeToSelected()
-                } label: {
-                    HStack {
-                        Text("字号 \(Self.fontSizeTitles[index])")
-                        if state.fontSizeIndex == index {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
+                Text("字号 \(Self.fontSizeTitles[index])").tag(index)
             }
         } label: {
-            HStack(spacing: 4) {
-                Text("字号 \(Self.fontSizeTitles[state.fontSizeIndex])")
-                    .font(.system(size: 12))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(height: 30)
-            .contentShape(Rectangle())
+            EmptyView()
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
+        .pickerStyle(.menu)
+        .frame(width: 96)
         .help("文字大小（配合文字工具）")
     }
 

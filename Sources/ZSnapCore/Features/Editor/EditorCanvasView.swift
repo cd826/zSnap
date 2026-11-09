@@ -66,10 +66,10 @@ final class EditorCanvasView: NSView {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.updateDisplayRect(updateFitScale: true)
+                self?.updateDisplayRect()
             }
         }
-        updateDisplayRect(updateFitScale: true)
+        updateDisplayRect()
     }
 
     deinit {
@@ -83,7 +83,7 @@ final class EditorCanvasView: NSView {
     /// 同步写回会造成守卫失效 + 无限递归（Phase 2 首版崩溃根因）。
     private func handleStateChange() {
         needsDisplay = true
-        updateDisplayRect(updateFitScale: false)
+        updateDisplayRect()
     }
 
     // MARK: - 布局
@@ -97,11 +97,10 @@ final class EditorCanvasView: NSView {
 
     override func layout() {
         super.layout()
-        // 仅真实布局变化（bounds 改变）时回写 fitScale，供"100%"按钮换算。
-        updateDisplayRect(updateFitScale: true)
+        updateDisplayRect()
     }
 
-    private func updateDisplayRect(updateFitScale: Bool) {
+    private func updateDisplayRect() {
         let pixelSize = state.document.pixelSize
         // 适配基准 = 滚动视图可视区域（NSScrollView 不会自动设定 documentView 尺寸，
         // 必须由此处显式管理 frame，否则画布为 0 尺寸 → 黑屏）。
@@ -112,7 +111,9 @@ final class EditorCanvasView: NSView {
         guard pixelSize.width > 0, pixelSize.height > 0, visible.width > 1, visible.height > 1 else { return }
 
         let fit = min(visible.width / pixelSize.width, visible.height / pixelSize.height)
-        let scale = fit * state.userZoom
+        state.updateFitScale(fit)
+        // 显示比例为绝对值（适应模式下由 updateFitScale 跟随窗口，手动缩放后固定）。
+        let scale = state.displayScale
         let size = CGSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
 
         // 文档视图尺寸 = max(图片显示尺寸, 可视区域)：图小于视口时居中，大图可滚动。
@@ -132,9 +133,6 @@ final class EditorCanvasView: NSView {
             height: size.height
         )
         displayScale = scale
-        if updateFitScale {
-            state.updateFitScale(fit)
-        }
         invalidateIntrinsicContentSize()
         needsDisplay = true
     }

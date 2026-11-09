@@ -52,8 +52,12 @@ final class EditorState: ObservableObject {
     @Published var lineWidthIndex = 1
     @Published var fontSizeIndex = 1
     @Published var selectedAnnotationID: UUID?
-    @Published var userZoom: CGFloat = 1
+    /// 绝对显示比例（1 图片像素 = displayScale 屏幕点）。
+    @Published private(set) var displayScale: CGFloat = 1
+    /// 当前可视区域下的适配比例。
     @Published private(set) var fitScale: CGFloat = 1
+    /// 适应模式：窗口变化时自动跟随适配；手动缩放后退出该模式。
+    @Published private(set) var isFitMode = true
     @Published var statusMessage: String?
 
     /// 马赛克像素化缓存（懒加载，与原图独立，不修改原图）。
@@ -87,21 +91,33 @@ final class EditorState: ObservableObject {
 
     // MARK: - 画布布局
 
+    var zoomLabel: String {
+        isFitMode ? "适应" : "\(Int((displayScale * 100).rounded()))%"
+    }
+
+    /// 画布上报可视区域的适配比例；适应模式下显示比例跟随其变化。
     func updateFitScale(_ scale: CGFloat) {
         guard abs(fitScale - scale) > 0.0001 else { return }
         fitScale = scale
+        if isFitMode {
+            displayScale = scale
+        }
     }
 
     func zoomToFit() {
-        userZoom = 1
+        isFitMode = true
+        displayScale = fitScale
     }
 
+    /// 1:1 = 1 图片像素对应 1 屏幕点（此后窗口变化不改变图片大小）。
     func zoomToActual() {
-        userZoom = fitScale > 0 ? 1 / fitScale : 1
+        isFitMode = false
+        displayScale = 1
     }
 
     func applyZoomDelta(_ delta: CGFloat) {
-        userZoom = min(4, max(0.2, userZoom * delta))
+        isFitMode = false
+        displayScale = min(8, max(0.05, displayScale * delta))
     }
 
     // MARK: - 标注操作
