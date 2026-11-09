@@ -96,10 +96,6 @@ final class EditorState: ObservableObject {
     private var _fitScaleBacking: CGFloat = 1
     private var _displayScaleBacking: CGFloat = 1
 
-    var zoomLabel: String {
-        isFitMode ? "适应" : "\(Int((displayScale * 100).rounded()))%"
-    }
-
     /// 画布上报可视区域的适配比例；适应模式下显示比例跟随其变化。
     func updateFitScale(_ scale: CGFloat) {
         guard abs(_fitScaleBacking - scale) > 0.0001 else { return }

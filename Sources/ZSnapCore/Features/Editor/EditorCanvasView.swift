@@ -31,11 +31,21 @@ final class EditorCanvasView: NSView {
         super.init(frame: .zero)
 
         // 状态/引擎变化 → 重绘。
+        // 必须异步执行：objectWillChange 是 willSet 通知，同步读取发布属性会拿到旧值
+        //（表现为"点两次才生效"）；下一轮主循环时新值已提交。
         state.objectWillChange
-            .sink { [weak self] _ in self?.handleStateChange() }
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.handleStateChange()
+                }
+            }
             .store(in: &cancellables)
         state.engine.objectWillChange
-            .sink { [weak self] _ in self?.needsDisplay = true }
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.needsDisplay = true
+                }
+            }
             .store(in: &cancellables)
 
         let magnification = NSMagnificationGestureRecognizer(target: self, action: #selector(handleMagnification(_:)))

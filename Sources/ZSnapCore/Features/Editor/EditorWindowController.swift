@@ -202,13 +202,6 @@ struct EditorToolbarView: View {
             }
             .buttonStyle(.plain)
             .help("实际大小（1 图片像素 = 1 屏幕点；⌘+滚轮亦可缩放）")
-
-            Text(state.zoomLabel)
-                .font(.system(size: 11))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 40)
-                .help("当前显示比例")
         }
     }
 
