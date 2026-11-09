@@ -358,12 +358,15 @@ final class EditorCanvasView: NSView {
         let fontSizePx = state.currentFontSizePx
         let fieldFontSize = max(10, fontSizePx * displayScale)
         let fieldWidth: CGFloat = 260
-        let fieldHeight = fieldFontSize + 14
+        // 高度收紧贴字：避免 NSTextField 垂直居中导致输入所见与最终渲染错位。
+        let fieldHeight = ceil(fieldFontSize * 1.4) + 2
         let viewOrigin = viewPoint(fromImage: imagePoint)
 
+        // 输入框顶边对齐点击点（翻转坐标 y 向下），与渲染规则一致：
+        // 点击点 = 文字块左上角。
         let field = NSTextField(frame: CGRect(
             x: viewOrigin.x,
-            y: flippedPoint(fromUp: viewOrigin).y - fieldHeight,
+            y: flippedPoint(fromUp: viewOrigin).y,
             width: fieldWidth,
             height: fieldHeight
         ))
