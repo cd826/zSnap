@@ -91,33 +91,44 @@ final class EditorState: ObservableObject {
 
     // MARK: - 画布布局
 
+    /// 非发布后备值：Combine 的 willSet 通知期间同步重入时读到的仍是旧发布值，
+    /// 守卫必须基于后备值（先更新后备值再发布）才能终止递归（两次爆栈的教训）。
+    private var _fitScale: CGFloat = 1
+    private var _displayScale: CGFloat = 1
+
     var zoomLabel: String {
         isFitMode ? "适应" : "\(Int((displayScale * 100).rounded()))%"
     }
 
     /// 画布上报可视区域的适配比例；适应模式下显示比例跟随其变化。
     func updateFitScale(_ scale: CGFloat) {
-        guard abs(fitScale - scale) > 0.0001 else { return }
+        guard abs(_fitScale - scale) > 0.0001 else { return }
+        _fitScale = scale
         fitScale = scale
         if isFitMode {
+            _displayScale = scale
             displayScale = scale
         }
     }
 
     func zoomToFit() {
         isFitMode = true
-        displayScale = fitScale
+        _displayScale = _fitScale
+        displayScale = _fitScale
     }
 
     /// 1:1 = 1 图片像素对应 1 屏幕点（此后窗口变化不改变图片大小）。
     func zoomToActual() {
         isFitMode = false
+        _displayScale = 1
         displayScale = 1
     }
 
     func applyZoomDelta(_ delta: CGFloat) {
         isFitMode = false
-        displayScale = min(8, max(0.05, displayScale * delta))
+        let newScale = min(8, max(0.05, _displayScale * delta))
+        _displayScale = newScale
+        displayScale = newScale
     }
 
     // MARK: - 标注操作
