@@ -113,3 +113,7 @@ scripts/             # bundle.sh（打包）/ make_icon.swift（图标）
 - 窗口截图含窗口真实形状（圆角处透明）；个别受保护窗口回退为区域裁剪
 - 贴图在 macOS 全屏 Space 的置顶表现受系统窗口层级机制约束
 - 自签名应用不入 App Store；对外分发需 Apple Developer 证书
+
+## License
+
+[MIT License](LICENSE) © 2026 cd826
