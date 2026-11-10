@@ -34,16 +34,25 @@ swift test              # 运行单元测试（43 项）
 
 ## 安装
 
-在本机安装为正式应用（两种方式）：
+### 他人安装（使用 DMG）
+
+1. 从 [GitHub Releases](https://github.com/cd826/zSnap/releases) 下载 `zSnap-<版本>.dmg`（前置要求：macOS 14+）
+2. 双击打开 DMG，将 zSnap 拖入 Applications 文件夹
+3. 首次打开若被 Gatekeeper 拦截（应用未公证）：在「系统设置 → 隐私与安全性」底部点击「仍要打开」，或执行 `xattr -d com.apple.quarantine /Applications/zSnap.app`
+4. 启动后按 ⌥A 触发截图 → 按应用内引导授权屏幕录制 → 重启应用即可
+
+### 本机开发安装（从源码构建）
 
 ```bash
 ./scripts/install.sh          # 一键安装：构建 → 退出旧实例 → 装入 /Applications → 启动
 ./scripts/make_dmg.sh         # 生成 build/zSnap-<版本>.dmg 拖拽安装镜像
 ```
 
+前置要求：macOS 14+，Xcode 或 Command Line Tools。注意：未配置签名证书的机器上构建会自动降级为 ad-hoc 签名，每次重新构建需重新授权屏幕录制——长期开发建议按上文创建 `zSnap Dev` 自签名证书。
+
 - 安装到 `/Applications` 后，屏幕录制授权**自动保留**（授权绑定代码签名，与应用路径无关）
 - 安装路径变更后，建议在 设置 → 登录时启动 重新开关一次以刷新开机启动项
-- DMG 若传给他人：因未做公证，对方首次打开需右键 → 打开（正式分发需 Apple Developer 公证，见 Phase 5 报告）
+- 正式对外分发需 Apple Developer 公证（评估见 Phase 5 报告）
 
 ## 使用说明
 
