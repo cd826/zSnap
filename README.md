@@ -117,3 +117,7 @@ scripts/             # bundle.sh（打包）/ make_icon.swift（图标）
 ## License
 
 [MIT License](LICENSE) © 2026 cd826
+
+## Community
+
+This project has been linked and endorsed by [LINUX DO Community](https://linux.do).
